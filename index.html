@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steganography Tool</title>
+    <style>
+    :root {
+        --background-color: #121212;
+        --surface-color: #1e1e1e;
+        --primary-color: #bb86fc;
+        --primary-variant: #3700b3;
+        --secondary-color: #03dac6;
+        --text-color: #e1e1e1;
+        --border-color: #333333;
+        --shadow-color: rgba(0, 0, 0, 0.5);
+        --error-color: #cf6679;
+    }
+
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        max-width: 700px;
+        margin: 2em auto;
+        padding: 1em;
+        background-color: var(--background-color);
+        color: var(--text-color);
+        transition: background-color 0.3s;
+    }
+
+    h1 {
+        color: var(--text-color);
+        text-align: center;
+        font-weight: 300;
+        letter-spacing: 2px;
+        margin-bottom: 1.5em;
+    }
+
+    h2 {
+        color: var(--primary-color);
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 0.5em;
+        margin-top: 0;
+        font-weight: 400;
+    }
+
+    .container {
+        background-color: var(--surface-color);
+        padding: 2.5em;
+        border-radius: 12px;
+        box-shadow: 0 8px 16px var(--shadow-color);
+        margin-bottom: 2.5em;
+        border: 1px solid var(--border-color);
+        transition: transform 0.2s ease-in-out;
+    }
+
+    .container:hover {
+        transform: translateY(-5px);
+    }
+
+    label {
+        display: block;
+        margin-bottom: .5em;
+        font-weight: 500;
+        font-size: 0.9em;
+        color: var(--secondary-color);
+    }
+
+    input[type="password"] {
+        background-color: #2c2c2c;
+        border: 1px solid var(--border-color);
+        color: var(--text-color);
+        width: 100%;
+        padding: 12px;
+        margin-bottom: 1.5em;
+        border-radius: 6px;
+        box-sizing: border-box;
+        transition: border-color 0.3s, box-shadow 0.3s;
+    }
+    
+    input[type="password"]:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 8px var(--primary-color);
+    }
+
+    input[type="file"] {
+        width: 100%;
+        margin-bottom: 1.5em;
+    }
+
+    /* Custom File Input Styling */
+    input[type="file"]::file-selector-button {
+        background-color: var(--primary-variant);
+        color: white;
+        padding: 10px 15px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        margin-right: 1em;
+    }
+
+    input[type="file"]::file-selector-button:hover {
+        background-color: var(--primary-color);
+    }
+
+    button {
+        background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
+        color: black;
+        font-weight: bold;
+        padding: 12px 20px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        width: 100%;
+        font-size: 1em;
+        transition: transform 0.2s, box-shadow 0.2s;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+    }
+
+    button:hover {
+        transform: scale(1.02);
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.6);
+    }
+    
+    button:active {
+        transform: scale(0.99);
+    }
+
+    #status {
+        text-align: center;
+        margin-top: 1.5em;
+        font-weight: 500;
+        min-height: 1.5em; /* Prevents layout shift */
+        transition: color 0.3s;
+    }
+</style>
+   
+</head>
+
+<body>
+
+    <h1>Image Encryption & Steganography</h1>
+
+    <div class="container">
+        <h2>Hide a Secret Image</h2>
+        <form id="hide-form">
+            <label for="secret-file">Secret Image (the one to hide):</label>
+            <input type="file" id="secret-file" name="secret" required>
+
+            <label for="cover-file">Cover Image (the one to hide inside):</label>
+            <input type="file" id="cover-file" name="cover" required>
+
+            <label for="hide-password">Password:</label>
+            <input type="password" id="hide-password" name="password" required>
+
+            <button type="submit">Hide & Download</button>
+        </form>
+    </div>
+
+    <div class="container">
+        <h2>Extract a Secret Image</h2>
+        <form id="extract-form">
+            <label for="stego-file">Stego Image (contains the secret):</label>
+            <input type="file" id="stego-file" name="stego" required>
+
+            <label for="extract-password">Password:</label>
+            <input type="password" id="extract-password" name="password" required>
+
+            <button type="submit">Extract & Download</button>
+        </form>
+    </div>
+
+    <p id="status"></p>
+
+    <script>
+        const hideForm = document.getElementById('hide-form');
+        const extractForm = document.getElementById('extract-form');
+        const statusEl = document.getElementById('status');
+        const API_URL = 'http://127.0.0.1:5000'; // Flask server address
+
+        // Handle the HIDE form submission
+        hideForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            statusEl.textContent = 'Hiding image...';
+
+            // Use FormData to send files and text
+            const formData = new FormData(hideForm);
+
+            try {
+                const response = await fetch(`${API_URL}/hide`, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Hiding failed.');
+                }
+
+                // If successful, the server sends back the image file
+                const blob = await response.blob();
+                downloadFile(blob, 'stego_image.png');
+                statusEl.textContent = 'Success! Stego image downloaded.';
+
+            } catch (error) {
+                statusEl.textContent = `Error: ${error.message}`;
+            }
+        });
+
+        // Handle the EXTRACT form submission
+        extractForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            statusEl.textContent = 'Extracting image...';
+
+            const formData = new FormData(extractForm);
+
+            try {
+                const response = await fetch(`${API_URL}/extract`, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Extraction failed.');
+                }
+
+                const blob = await response.blob();
+                downloadFile(blob, 'extracted_secret.png');
+                statusEl.textContent = 'Success! Secret image downloaded.';
+
+            } catch (error) {
+                statusEl.textContent = `Error: ${error.message}`;
+            }
+        });
+
+        // Helper function to trigger a browser download
+        function downloadFile(blob, filename) {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }
+    </script>
+</body>
+
+</html>
