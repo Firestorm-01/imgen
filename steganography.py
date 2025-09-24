@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import struct
+import os
 from PIL import Image
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
@@ -15,11 +16,9 @@ SCRYPT_N = 2**14
 SCRYPT_R = 8
 SCRYPT_P = 1
 
-
 # --- Crypto Helpers ---
 def derive_key(password: bytes, salt: bytes) -> bytes:
     return scrypt(password, salt, KEY_LEN, N=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P)
-
 
 def encrypt_image(secret_path: str, password: str) -> bytes:
     data = open(secret_path, "rb").read()
@@ -31,7 +30,6 @@ def encrypt_image(secret_path: str, password: str) -> bytes:
     tag = cipher.digest()
     encrypted = salt + nonce + ciphertext + tag
     return struct.pack(">I", len(encrypted)) + encrypted  # prepend length
-
 
 def decrypt_image(encrypted_bytes: bytes, password: str) -> bytes:
     if len(encrypted_bytes) < 4 + SALT_LEN + NONCE_LEN + TAG_LEN:
@@ -47,14 +45,12 @@ def decrypt_image(encrypted_bytes: bytes, password: str) -> bytes:
     cipher.verify(tag)  # Raises if tampered
     return plaintext
 
-
 # --- Steganography ---
 def hide_bytes_in_image(cover_path: str, secret_bytes: bytes, output_path: str):
     img = Image.open(cover_path).convert("RGB")
     width, height = img.size
     pixels = img.load()
 
-    # Prepend 4-byte length
     length = len(secret_bytes)
     header = length.to_bytes(4, "big")
     data = header + secret_bytes
@@ -80,39 +76,25 @@ def hide_bytes_in_image(cover_path: str, secret_bytes: bytes, output_path: str):
         if idx >= len(data_bits):
             break
 
+    output_path = os.path.abspath(output_path)
     img.save(output_path)
     print(f"[+] Secret hidden inside '{output_path}'")
-
 
 def extract_bytes_from_image(stego_path: str) -> bytes:
     img = Image.open(stego_path).convert("RGB")
     width, height = img.size
     pixels = img.load()
 
-    # Helper to generate LSBs lazily
-    def lsb_stream():
-        for y in range(height):
-            for x in range(width):
-                r, g, b = pixels[x, y]
-                yield (r & 1)
-                yield (g & 1)
-                yield (b & 1)
+    bits = []
+    for y in range(height):
+        for x in range(width):
+            r, g, b = pixels[x, y]
+            bits.extend([r & 1, g & 1, b & 1])
 
-    gen = lsb_stream()
+    length_bits = bits[:32]
+    length = int("".join(str(b) for b in length_bits), 2)
 
-    # Read first 32 bits to get the length of the embedded payload
-    header_bits = [next(gen) for _ in range(32)]
-    length = int("".join(str(b) for b in header_bits), 2)
-
-    # Sanity check capacity: total available payload bits after header
-    available_bits = (width * height * 3) - 32
-    if length < 0 or (length * 8) > available_bits:
-        raise ValueError("Invalid or corrupted stego image: declared length exceeds capacity.")
-
-    # Now read exactly length * 8 bits
-    data_bits = [next(gen) for _ in range(length * 8)]
-
-    # Reconstruct bytes
+    data_bits = bits[32:32 + (length * 8)]
     secret_bytes = bytearray()
     for i in range(0, len(data_bits), 8):
         byte = int("".join(str(b) for b in data_bits[i:i+8]), 2)
@@ -120,38 +102,53 @@ def extract_bytes_from_image(stego_path: str) -> bytes:
 
     return bytes(secret_bytes)
 
-
 # --- CLI ---
 def main():
-    parser = argparse.ArgumentParser(description="Image Encryption + Steganography Tool")
+    parser = argparse.ArgumentParser(description="Image Encryption + Optional Steganography Tool")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Hide
-    hide_p = subparsers.add_parser("hide", help="Hide an image inside a cover image")
+    # Hide / Encrypt
+    hide_p = subparsers.add_parser("hide", help="Hide or encrypt an image")
     hide_p.add_argument("secret", help="Path to secret image")
-    hide_p.add_argument("cover", help="Path to cover image")
-    hide_p.add_argument("output", help="Path to output stego image")
+    hide_p.add_argument("--cover", help="Path to cover image (optional for steganography)")
+    hide_p.add_argument("output", help="Path to output file (encrypted or stego)")
     hide_p.add_argument("password", help="Password for encryption")
 
-    # Extract
-    extract_p = subparsers.add_parser("extract", help="Extract a hidden image")
-    extract_p.add_argument("stego", help="Path to stego image")
-    extract_p.add_argument("password", help="Password used during hiding")
+    # Extract / Decrypt
+    extract_p = subparsers.add_parser("extract", help="Extract or decrypt an image")
+    extract_p.add_argument("input_file", help="Path to encrypted or stego image")
+    extract_p.add_argument("password", help="Password used during encryption")
     extract_p.add_argument("output", help="Path to save decrypted secret image")
+    extract_p.add_argument("--stego", action="store_true", help="Set if input_file is a stego image")
 
     args = parser.parse_args()
 
     if args.command == "hide":
         encrypted_bytes = encrypt_image(args.secret, args.password)
-        hide_bytes_in_image(args.cover, encrypted_bytes, args.output)
+        if args.cover:
+            hide_bytes_in_image(args.cover, encrypted_bytes, args.output)
+        else:
+            output_path = os.path.abspath(args.output)
+            with open(output_path, "wb") as f:
+                f.write(encrypted_bytes)
+            print(f"[+] Secret encrypted to '{output_path}' (no steganography)")
 
     elif args.command == "extract":
-        encrypted_bytes = extract_bytes_from_image(args.stego)
+        if getattr(args, "stego", False):
+            encrypted_bytes = extract_bytes_from_image(args.input_file)
+        else:
+            with open(args.input_file, "rb") as f:
+                encrypted_bytes = f.read()
         plaintext = decrypt_image(encrypted_bytes, args.password)
-        with open(args.output, "wb") as f:
+        output_path = os.path.abspath(args.output)
+        with open(output_path, "wb") as f:
             f.write(plaintext)
-        print(f"[+] Secret extracted to '{args.output}'")
-
+        print(f"[+] Secret extracted to '{output_path}'")
 
 if __name__ == "__main__":
-    main()
+    main() """
+option for no steg included for lightweight ops!
+python script.py hide secret.png output.enc mypassword
+python script.py hide secret.png output.png mypassword --cover cover.png
+python script.py extract output.enc mypassword decrypted.png
+python script.py extract output.png mypassword decrypted.png --stego""
