@@ -10,4 +10,13 @@ __pycache__/
 /venv/
 /.venv/
 /temp_uploads/
+.temp/
+.temp_uploads/
+/venv/
+/.venv/
+/temp_uploads/
 *.log
+
+# Ignore example binary images that should not be tracked in production
+*.jpg
+*.png
