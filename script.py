@@ -21,7 +21,11 @@ def derive_key(password: bytes, salt: bytes) -> bytes:
     return scrypt(password, salt, KEY_LEN, N=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P)
 
 def encrypt_image(secret_path: str, password: str) -> bytes:
-    data = open(secret_path, "rb").read()
+    filename = os.path.basename(secret_path).encode("utf-8")
+    if len(filename) > 0xFFFF:
+        raise ValueError("Filename too long to embed")
+    file_bytes = open(secret_path, "rb").read()
+    data = struct.pack(">H", len(filename)) + filename + file_bytes
     salt = get_random_bytes(SALT_LEN)
     nonce = get_random_bytes(NONCE_LEN)
     key = derive_key(password.encode(), salt)
@@ -44,6 +48,17 @@ def decrypt_image(encrypted_bytes: bytes, password: str) -> bytes:
     plaintext = cipher.decrypt(ciphertext)
     cipher.verify(tag)  # Raises if tampered
     return plaintext
+
+
+def parse_decrypted_payload(plaintext: bytes):
+    if len(plaintext) < 2:
+        raise ValueError("Decrypted payload too short to contain filename header")
+    fname_len = int.from_bytes(plaintext[:2], "big")
+    if len(plaintext) < 2 + fname_len:
+        raise ValueError("Decrypted payload truncated (filename length mismatch)")
+    filename = plaintext[2:2+fname_len].decode("utf-8", errors="replace")
+    file_bytes = plaintext[2+fname_len:]
+    return filename, file_bytes
 
 # --- Steganography ---
 def hide_bytes_in_image(cover_path: str, secret_bytes: bytes, output_path: str):
@@ -136,14 +151,29 @@ def main():
     elif args.command == "extract":
         if getattr(args, "stego", False):
             encrypted_bytes = extract_bytes_from_image(args.input_file)
+            plaintext = decrypt_image(encrypted_bytes, args.password)
+            # When extracting from a stego image we embedded the original
+            # filename; restore it unless the user specified an explicit
+            # output path.
+            filename, file_bytes = parse_decrypted_payload(plaintext)
+            if args.output == "-":
+                # write to stdout
+                import sys
+                sys.stdout.buffer.write(file_bytes)
+                print(f"[+] Secret extracted to stdout (original name: {filename})")
+            else:
+                out_path = os.path.abspath(args.output)
+                with open(out_path, "wb") as f:
+                    f.write(file_bytes)
+                print(f"[+] Secret extracted to '{out_path}' (original name: {filename})")
         else:
             with open(args.input_file, "rb") as f:
                 encrypted_bytes = f.read()
-        plaintext = decrypt_image(encrypted_bytes, args.password)
-        output_path = os.path.abspath(args.output)
-        with open(output_path, "wb") as f:
-            f.write(plaintext)
-        print(f"[+] Secret extracted to '{output_path}'")
+            plaintext = decrypt_image(encrypted_bytes, args.password)
+            out_path = os.path.abspath(args.output)
+            with open(out_path, "wb") as f:
+                f.write(plaintext)
+            print(f"[+] Secret extracted to '{out_path}'")
 
 if __name__ == "__main__":
     main()

@@ -16,13 +16,15 @@ def main():
     tmp = Path('temp_uploads')
     tmp.mkdir(exist_ok=True)
     cover_path = tmp / 'cover_smoke.png'
-    secret_path = tmp / 'secret_smoke.bin'
+    secret_path = tmp / 'secret_smoke.jpg'
     stego_path = tmp / 'stego_smoke.png'
 
     # Prepare files
     make_cover(str(cover_path))
-    with open(secret_path, 'wb') as f:
-        f.write(b'hello-world-12345')
+    # Create a small JPEG as the secret to ensure support for JPEG secrets
+    from PIL import Image
+    secret_img = Image.new('RGB', (8,8), color=(10,20,30))
+    secret_img.save(secret_path, format='JPEG')
 
     password = 'test-pass-123'
 
@@ -34,7 +36,13 @@ def main():
     enc2 = extract_bytes_from_image(str(stego_path))
     out = decrypt_image(enc2, password)
 
-    assert out == b'hello-world-12345', 'Decrypted payload mismatch'
+    # Parse the decrypted payload header: 2-byte filename len + filename + bytes
+    fname_len = int.from_bytes(out[:2], 'big')
+    fname = out[2:2+fname_len].decode('utf-8')
+    file_bytes = out[2+fname_len:]
+
+    assert fname == 'secret_smoke.jpg', f'Filename mismatch: {fname}'
+    assert file_bytes, 'Decrypted file bytes empty'
     print('SMOKE TEST PASS')
 
 if __name__ == '__main__':

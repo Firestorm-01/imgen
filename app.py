@@ -13,6 +13,7 @@ from steganography import (
     hide_bytes_in_image,
     extract_bytes_from_image,
     decrypt_image,
+    parse_decrypted_payload,
 )
 
 
@@ -71,20 +72,42 @@ def hide_image_endpoint():
     try:
         encrypted_bytes = encrypt_image(secret_path, password)
         hide_bytes_in_image(cover_path, encrypted_bytes, output_path)
+        # Ensure the file was written and send its bytes back to the client
+        try:
+            with open(output_path, "rb") as f:
+                file_bytes = f.read()
+        except Exception:
+            # If we can't read the generated file, return an error
+            for p in (secret_path, cover_path, output_path):
+                try:
+                    if os.path.exists(p):
+                        os.remove(p)
+                except Exception:
+                    pass
+            return jsonify({"error": "Failed to generate stego image."}), 500
+
+        if not file_bytes:
+            # Prevent returning an empty file to clients
+            for p in (secret_path, cover_path, output_path):
+                try:
+                    if os.path.exists(p):
+                        os.remove(p)
+                except Exception:
+                    pass
+            return jsonify({"error": "Generated stego image is empty."}), 500
 
         # Schedule cleanup of the temporary files shortly after returning
         _cleanup_file_later(secret_path, delay=5.0)
         _cleanup_file_later(cover_path, delay=5.0)
         _cleanup_file_later(output_path, delay=15.0)
 
-        # Send the generated stego image
+        # Send the generated stego image from memory to avoid race conditions
         return send_file(
-            output_path,
+            io.BytesIO(file_bytes),
             as_attachment=True,
             download_name="stego_image.png",
             mimetype="image/png",
         )
-
     except ValueError as e:
         # Validation errors (e.g., cover too small)
         # Clean up immediately
@@ -95,6 +118,16 @@ def hide_image_endpoint():
             except Exception:
                 pass
         return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        # Unexpected errors: clean up and return a JSON error so the client
+        # doesn't receive an empty response body.
+        for p in (secret_path, cover_path, output_path):
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
+        return jsonify({"error": "Internal server error while hiding image."}), 500
 
 
 @app.route("/extract", methods=["POST"])
@@ -117,13 +150,42 @@ def extract_image_endpoint():
         # Schedule cleanup of the uploaded stego file
         _cleanup_file_later(stego_path, delay=5.0)
 
+        if not decrypted_bytes:
+            try:
+                if os.path.exists(stego_path):
+                    os.remove(stego_path)
+            except Exception:
+                pass
+            return jsonify({"error": "Decrypted payload is empty."}), 400
+
+        # Parse payload to get original filename and bytes
+        try:
+            orig_name, file_bytes = parse_decrypted_payload(decrypted_bytes)
+        except Exception:
+            # Fallback: treat decrypted_bytes as raw image bytes
+            orig_name = "extracted_secret"
+            file_bytes = decrypted_bytes
+
+        # Guess a mimetype from filename extension
+        import mimetypes
+        mimetype, _ = mimetypes.guess_type(orig_name)
+        if not mimetype:
+            mimetype = "application/octet-stream"
+
         return send_file(
-            io.BytesIO(decrypted_bytes),
+            io.BytesIO(file_bytes),
             as_attachment=True,
-            download_name="extracted_secret.png",
-            mimetype="image/png",
+            download_name=orig_name,
+            mimetype=mimetype,
         )
 
+    except ValueError as e:
+        try:
+            if os.path.exists(stego_path):
+                os.remove(stego_path)
+        except Exception:
+            pass
+        return jsonify({"error": str(e)}), 400
     except Exception:
         # We don't reveal detailed crypto errors to clients in production
         try:
