@@ -303,6 +303,14 @@
             document.body.removeChild(a);
         }
     </script>
+    <script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register("{{ url_for('static', filename='service-worker.js') }}")
+    .then(reg => console.log("Service Worker registered!", reg))
+    .catch(err => console.error("Service Worker failed:", err));
+}
+</script>
+
 </body>
 
 </html>
