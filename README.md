@@ -41,17 +41,6 @@ Production notes
 - Protect the server behind HTTPS and add authentication if exposing it to the internet.
 - Temporary files are written to a secure temp directory at runtime. The app schedules best-effort cleanup.
 
-Repository cleanup
------------------
-
-The repository previously contained example images used for development. To fully remove them from Git history and the working tree you can run the included `cleanup_repo.sh` script (it will remove example image files and perform `git rm`).
-
-If you only want to keep the code but not the binary sample images, run locally:
-
-	./cleanup_repo.sh
-
-This operation modifies your working tree (and commits) — review the script before running.
-
 Running tests / smoke test
 --------------------------
 
