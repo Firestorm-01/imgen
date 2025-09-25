@@ -82,7 +82,7 @@
         box-sizing: border-box;
         transition: border-color 0.3s, box-shadow 0.3s;
     }
-    
+
     input[type="password"]:focus {
         outline: none;
         border-color: var(--primary-color);
@@ -128,7 +128,7 @@
         transform: scale(1.02);
         box-shadow: 0 6px 12px rgba(0, 0, 0, 0.6);
     }
-    
+
     button:active {
         transform: scale(0.99);
     }
@@ -156,7 +156,7 @@
         display: none;
     }
 </style>
-    
+
 </head>
 
 <body>
@@ -206,102 +206,94 @@
 
     <p id="status"></p>
 
-    <script>
-        const hideForm = document.getElementById('hide-form');
-        const extractForm = document.getElementById('extract-form');
-        const statusEl = document.getElementById('status');
-        const useStegoCheckbox = document.getElementById('use-stego');
-        const coverContainer = document.querySelector('.cover-container');
-        const coverFile = document.getElementById('cover-file');
-        const isStegoCheckbox = document.getElementById('is-stego');
-        
-        const API_URL = 'http://127.0.0.1:5000'; // Flask server address
+   <script>
+const hideForm = document.getElementById('hide-form');
+const extractForm = document.getElementById('extract-form');
+const statusEl = document.getElementById('status');
+const useStegoCheckbox = document.getElementById('use-stego');
+const coverContainer = document.querySelector('.cover-container');
+const coverFile = document.getElementById('cover-file');
+const isStegoCheckbox = document.getElementById('is-stego');
 
-        // Function to toggle cover file field based on checkbox state
-        function toggleCoverField() {
-            if (useStegoCheckbox.checked) {
-                coverContainer.classList.remove('hidden');
-                coverFile.setAttribute('required', 'required');
+const API_URL = 'https://stegcrypt.pythonanywhere.com';
+
+// Toggle cover file input
+function toggleCoverField() {
+    if (useStegoCheckbox.checked) {
+        coverContainer.classList.remove('hidden');
+        coverFile.setAttribute('required', 'required');
+    } else {
+        coverContainer.classList.add('hidden');
+        coverFile.removeAttribute('required');
+    }
+}
+useStegoCheckbox.addEventListener('change', toggleCoverField);
+toggleCoverField();
+
+function downloadFile(blob, filename) {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+}
+
+async function submitForm(form, endpoint, defaultFilename) {
+    statusEl.textContent = 'Processing...';
+    const formData = new FormData(form);
+
+    try {
+        const response = await fetch(`${API_URL}/${endpoint}`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!response.ok) {
+            let errorMsg = `${endpoint} failed.`;
+            if (contentType.includes('application/json')) {
+                const errJson = await response.json();
+                if (errJson.error) errorMsg = errJson.error;
             } else {
-                coverContainer.classList.add('hidden');
-                coverFile.removeAttribute('required');
+                const text = await response.text();
+                errorMsg = text || errorMsg;
             }
+            throw new Error(errorMsg);
         }
 
-        // Add event listener to the "use stego" checkbox
-        useStegoCheckbox.addEventListener('change', toggleCoverField);
-        // Initial call to set the correct state on page load
-        toggleCoverField();
-
-        // Handle the HIDE form submission
-        hideForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            statusEl.textContent = 'Processing...';
-
-            // Use FormData to send files and text
-            const formData = new FormData(hideForm);
-
-            try {
-                const response = await fetch(`${API_URL}/hide`, {
-                    method: 'POST',
-                    body: formData,
-                });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Hiding failed.');
-                }
-
-                // If successful, the server sends back the file
-                const blob = await response.blob();
-                const filename = useStegoCheckbox.checked ? 'stego_image.png' : 'secret.enc';
-                downloadFile(blob, filename);
-                statusEl.textContent = 'Success! File downloaded.';
-
-            } catch (error) {
-                statusEl.textContent = `Error: ${error.message}`;
-            }
-        });
-
-        // Handle the EXTRACT form submission
-        extractForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            statusEl.textContent = 'Extracting image...';
-
-            const formData = new FormData(extractForm);
-
-            try {
-                const response = await fetch(`${API_URL}/extract`, {
-                    method: 'POST',
-                    body: formData,
-                });
-
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Extraction failed.');
-                }
-
-                const blob = await response.blob();
-                downloadFile(blob, 'extracted_secret.png');
-                statusEl.textContent = 'Success! Secret image downloaded.';
-
-            } catch (error) {
-                statusEl.textContent = `Error: ${error.message}`;
-            }
-        });
-
-        // Helper function to trigger a browser download
-        function downloadFile(blob, filename) {
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
+        // If response is file (not JSON)
+        if (contentType.includes('application/octet-stream') || contentType.includes('image')) {
+            const blob = await response.blob();
+            downloadFile(blob, defaultFilename);
+            statusEl.textContent = 'Success! File downloaded.';
+        } else if (contentType.includes('application/json')) {
+            const json = await response.json();
+            if (json.error) throw new Error(json.error);
         }
+
+    } catch (err) {
+        statusEl.textContent = `Error: ${err.message}`;
+    }
+}
+
+// HIDE form
+hideForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const filename = useStegoCheckbox.checked ? 'stego_image.png' : 'secret.enc';
+    submitForm(hideForm, 'hide', filename);
+});
+
+// EXTRACT form
+extractForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitForm(extractForm, 'extract', 'extracted_secret.png');
+});
+</script>
+
     </script>
     <script>
 if ('serviceWorker' in navigator) {
