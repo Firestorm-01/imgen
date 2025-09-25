@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -135,8 +137,23 @@
         min-height: 1.5em; /* Prevents layout shift */
         transition: color 0.3s;
     }
+    .checkbox-container {
+        display: flex;
+        align-items: center;
+        margin-bottom: 1.5em;
+    }
+    .checkbox-container input {
+        width: auto;
+        margin-right: 10px;
+    }
+    .cover-container {
+        display: block; /* Initially visible */
+    }
+    .cover-container.hidden {
+        display: none;
+    }
 </style>
-   
+    
 </head>
 
 <body>
@@ -149,21 +166,33 @@
             <label for="secret-file">Secret Image (the one to hide):</label>
             <input type="file" id="secret-file" name="secret" required>
 
-            <label for="cover-file">Cover Image (the one to hide inside):</label>
-            <input type="file" id="cover-file" name="cover" required>
+            <div class="checkbox-container">
+                <input type="checkbox" id="use-stego" name="use_stego" checked>
+                <label for="use-stego" style="margin-bottom: 0;">Use Steganography?</label>
+            </div>
+
+            <div class="cover-container">
+                <label for="cover-file">Cover Image (the one to hide inside):</label>
+                <input type="file" id="cover-file" name="cover" required>
+            </div>
 
             <label for="hide-password">Password:</label>
             <input type="password" id="hide-password" name="password" required>
 
-            <button type="submit">Hide & Download</button>
+            <button type="submit">Process & Download</button>
         </form>
     </div>
 
     <div class="container">
         <h2>Extract a Secret Image</h2>
         <form id="extract-form">
-            <label for="stego-file">Stego Image (contains the secret):</label>
-            <input type="file" id="stego-file" name="stego" required>
+            <label for="input-file">Input File (encrypted .enc or stego .png):</label>
+            <input type="file" id="input-file" name="input_file" required>
+
+            <div class="checkbox-container">
+                <input type="checkbox" id="is-stego" name="is_stego" checked>
+                <label for="is-stego" style="margin-bottom: 0;">Was a Stego Image?</label>
+            </div>
 
             <label for="extract-password">Password:</label>
             <input type="password" id="extract-password" name="password" required>
@@ -178,14 +207,33 @@
         const hideForm = document.getElementById('hide-form');
         const extractForm = document.getElementById('extract-form');
         const statusEl = document.getElementById('status');
-    // Use the hosted backend on Render. No trailing slash to avoid double-slashes when
-    // appending route paths like `${API_URL}/hide`.
-    const API_URL = 'https://imgen-1.onrender.com'; // Hosted Flask server address
+        const useStegoCheckbox = document.getElementById('use-stego');
+        const coverContainer = document.querySelector('.cover-container');
+        const coverFile = document.getElementById('cover-file');
+        const isStegoCheckbox = document.getElementById('is-stego');
+        
+        const API_URL = 'http://127.0.0.1:5000'; // Flask server address
+
+        // Function to toggle cover file field based on checkbox state
+        function toggleCoverField() {
+            if (useStegoCheckbox.checked) {
+                coverContainer.classList.remove('hidden');
+                coverFile.setAttribute('required', 'required');
+            } else {
+                coverContainer.classList.add('hidden');
+                coverFile.removeAttribute('required');
+            }
+        }
+
+        // Add event listener to the "use stego" checkbox
+        useStegoCheckbox.addEventListener('change', toggleCoverField);
+        // Initial call to set the correct state on page load
+        toggleCoverField();
 
         // Handle the HIDE form submission
         hideForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            statusEl.textContent = 'Hiding image...';
+            statusEl.textContent = 'Processing...';
 
             // Use FormData to send files and text
             const formData = new FormData(hideForm);
@@ -201,10 +249,11 @@
                     throw new Error(error.error || 'Hiding failed.');
                 }
 
-                // If successful, the server sends back the image file
+                // If successful, the server sends back the file
                 const blob = await response.blob();
-                downloadFile(blob, 'stego_image.png');
-                statusEl.textContent = 'Success! Stego image downloaded.';
+                const filename = useStegoCheckbox.checked ? 'stego_image.png' : 'secret.enc';
+                downloadFile(blob, filename);
+                statusEl.textContent = 'Success! File downloaded.';
 
             } catch (error) {
                 statusEl.textContent = `Error: ${error.message}`;
