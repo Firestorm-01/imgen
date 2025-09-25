@@ -18,7 +18,7 @@ Quick start
 
 	python app.py
 
-3. Open `index.html` in your browser and use the web UI (it expects the server at http://127.0.0.1:5000).
+3. Open `index.html` in your browser and use the web UI (it expects the server at https://imgen-1.onrender.com).
 
 CLI examples
 ------------

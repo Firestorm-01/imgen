@@ -178,7 +178,9 @@
         const hideForm = document.getElementById('hide-form');
         const extractForm = document.getElementById('extract-form');
         const statusEl = document.getElementById('status');
-        const API_URL = 'http://127.0.0.1:5000'; // Flask server address
+    // Use the hosted backend on Render. No trailing slash to avoid double-slashes when
+    // appending route paths like `${API_URL}/hide`.
+    const API_URL = 'https://imgen-1.onrender.com'; // Hosted Flask server address
 
         // Handle the HIDE form submission
         hideForm.addEventListener('submit', async (e) => {
