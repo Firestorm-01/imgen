@@ -146,9 +146,4 @@ def main():
         print(f"[+] Secret extracted to '{output_path}'")
 
 if __name__ == "__main__":
-    main() """
-option for no steg included for lightweight ops!
-python script.py hide secret.png output.enc mypassword
-python script.py hide secret.png output.png mypassword --cover cover.png
-python script.py extract output.enc mypassword decrypted.png
-python script.py extract output.png mypassword decrypted.png --stego""
+    main()

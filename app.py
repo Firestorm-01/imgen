@@ -62,7 +62,11 @@ def hide_image_endpoint():
     secret_file.save(secret_path)
     cover_file.save(cover_path)
 
-    output_path = os.path.join(app.config["UPLOAD_FOLDER"], "stego_image.png")
+    # Use a unique temporary file for the output to avoid collisions when
+    # multiple requests are processed concurrently.
+    tf = tempfile.NamedTemporaryFile(prefix="stego_", suffix=".png", dir=app.config["UPLOAD_FOLDER"], delete=False)
+    output_path = tf.name
+    tf.close()
 
     try:
         encrypted_bytes = encrypt_image(secret_path, password)
