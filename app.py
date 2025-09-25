@@ -33,7 +33,11 @@ def hide():
         output_bytes = encrypt_image(secret_bytes, password)
         output_filename = 'secret.enc'
 
-    return send_file(BytesIO(output_bytes), download_name=output_filename, as_attachment=True)
+    return send_file(
+        BytesIO(output_bytes),
+        attachment_filename=output_filename,
+        as_attachment=True
+    )
 
 @app.route('/extract', methods=['POST'])
 def extract():
@@ -49,7 +53,11 @@ def extract():
     else:
         decrypted_bytes = decrypt_image(input_bytes, password)
 
-    return send_file(BytesIO(decrypted_bytes), download_name='extracted_secret.png', as_attachment=True)
+    return send_file(
+        BytesIO(decrypted_bytes),
+        attachment_filename='extracted_secret.png',
+        as_attachment=True
+    )
 
 if __name__ == '__main__':
     app.run(debug=True)
