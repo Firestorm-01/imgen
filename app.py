@@ -1,202 +1,120 @@
-# app.py
 import io
 import os
-import tempfile
-import threading
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-# Import the functions from the steganography module
-from steganography import (
-    encrypt_image,
-    hide_bytes_in_image,
-    extract_bytes_from_image,
-    decrypt_image,
-    parse_decrypted_payload,
-)
-
-
-def _cleanup_file_later(path: str, delay: float = 5.0):
-    """Remove a file after `delay` seconds in a background thread.
-
-    This avoids leaving temporary files behind after send_file returns.
-    """
-
-    def _remove():
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            # Best-effort removal; don't crash the app if it fails
-            pass
-
-    t = threading.Timer(delay, _remove)
-    t.daemon = True
-    t.start()
-
+# Assuming your steganography.py module is in the same directory
+from steganography import encrypt_image, hide_bytes_in_image, \
+                         extract_bytes_from_image, decrypt_image
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Enable Cross-Origin Resource Sharing
 
-# Use a secure temporary directory for uploads at runtime
-RUNTIME_TMP = tempfile.mkdtemp(prefix="imgen_")
-app.config["UPLOAD_FOLDER"] = RUNTIME_TMP
+# Create a temporary folder for uploads
+UPLOAD_FOLDER = 'temp_uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Limit uploads to a reasonable size (here ~20 MB). Adjust as needed.
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
-
-
-@app.route("/hide", methods=["POST"])
+@app.route('/hide', methods=['POST'])
 def hide_image_endpoint():
-    if "secret" not in request.files or "cover" not in request.files:
-        return jsonify({"error": "Missing secret or cover image file"}), 400
-    if "password" not in request.form:
-        return jsonify({"error": "Missing password"}), 400
+    # 1. Check if files and password are in the request
+    if 'secret' not in request.files or 'password' not in request.form:
+        return jsonify({"error": "Missing secret image or password"}), 400
 
-    secret_file = request.files["secret"]
-    cover_file = request.files["cover"]
-    password = request.form["password"]
+    secret_file = request.files['secret']
+    password = request.form['password']
+    use_stego = request.form.get('use_stego') # Check for the stego flag
 
-    secret_path = os.path.join(app.config["UPLOAD_FOLDER"], secure_filename(secret_file.filename))
-    cover_path = os.path.join(app.config["UPLOAD_FOLDER"], secure_filename(cover_file.filename))
+    # 2. Securely save the uploaded secret file temporarily
+    secret_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(secret_file.filename))
     secret_file.save(secret_path)
-    cover_file.save(cover_path)
-
-    # Use a unique temporary file for the output to avoid collisions when
-    # multiple requests are processed concurrently.
-    tf = tempfile.NamedTemporaryFile(prefix="stego_", suffix=".png", dir=app.config["UPLOAD_FOLDER"], delete=False)
-    output_path = tf.name
-    tf.close()
 
     try:
+        # 3. Encrypt the secret image data first, regardless of stego
         encrypted_bytes = encrypt_image(secret_path, password)
-        hide_bytes_in_image(cover_path, encrypted_bytes, output_path)
-        # Ensure the file was written and send its bytes back to the client
-        try:
-            with open(output_path, "rb") as f:
-                file_bytes = f.read()
-        except Exception:
-            # If we can't read the generated file, return an error
-            for p in (secret_path, cover_path, output_path):
-                try:
-                    if os.path.exists(p):
-                        os.remove(p)
-                except Exception:
-                    pass
-            return jsonify({"error": "Failed to generate stego image."}), 500
-
-        if not file_bytes:
-            # Prevent returning an empty file to clients
-            for p in (secret_path, cover_path, output_path):
-                try:
-                    if os.path.exists(p):
-                        os.remove(p)
-                except Exception:
-                    pass
-            return jsonify({"error": "Generated stego image is empty."}), 500
-
-        # Schedule cleanup of the temporary files shortly after returning
-        _cleanup_file_later(secret_path, delay=5.0)
-        _cleanup_file_later(cover_path, delay=5.0)
-        _cleanup_file_later(output_path, delay=15.0)
-
-        # Send the generated stego image from memory to avoid race conditions
-        return send_file(
-            io.BytesIO(file_bytes),
-            as_attachment=True,
-            download_name="stego_image.png",
-            mimetype="image/png",
-        )
+        
+        # 4. Handle steganography option
+        if use_stego and 'cover' in request.files:
+            cover_file = request.files['cover']
+            cover_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(cover_file.filename))
+            cover_file.save(cover_path)
+            
+            output_path = os.path.join(app.config['UPLOAD_FOLDER'], "stego_image.png")
+            hide_bytes_in_image(cover_path, encrypted_bytes, output_path)
+            
+            # Send the resulting stego image
+            return send_file(
+                output_path,
+                as_attachment=True,
+                download_name='stego_image.png',
+                mimetype='image/png'
+            )
+        else:
+            # No steganography, just send the encrypted file
+            output_path = os.path.join(app.config['UPLOAD_FOLDER'], "secret.enc")
+            with open(output_path, "wb") as f:
+                f.write(encrypted_bytes)
+            
+            # Send the resulting encrypted file
+            return send_file(
+                output_path,
+                as_attachment=True,
+                download_name='secret.enc',
+                mimetype='application/octet-stream' # Generic binary file type
+            )
+            
     except ValueError as e:
-        # Validation errors (e.g., cover too small)
-        # Clean up immediately
-        for p in (secret_path, cover_path, output_path):
-            try:
-                if os.path.exists(p):
-                    os.remove(p)
-            except Exception:
-                pass
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        # Unexpected errors: clean up and return a JSON error so the client
-        # doesn't receive an empty response body.
-        for p in (secret_path, cover_path, output_path):
-            try:
-                if os.path.exists(p):
-                    os.remove(p)
-            except Exception:
-                pass
-        return jsonify({"error": "Internal server error while hiding image."}), 500
+    finally:
+        # 5. Clean up the temporary files
+        if os.path.exists(secret_path): os.remove(secret_path)
+        if 'cover_path' in locals() and os.path.exists(cover_path): os.remove(cover_path)
+        # Note: A more robust app would clean up output_path after sending.
 
-
-@app.route("/extract", methods=["POST"])
+@app.route('/extract', methods=['POST'])
 def extract_image_endpoint():
-    if "stego" not in request.files:
-        return jsonify({"error": "Missing stego image file"}), 400
-    if "password" not in request.form:
+    # 1. Check for file and password
+    if 'input_file' not in request.files:
+        return jsonify({"error": "Missing input file"}), 400
+    if 'password' not in request.form:
         return jsonify({"error": "Missing password"}), 400
 
-    stego_file = request.files["stego"]
-    password = request.form["password"]
+    input_file = request.files['input_file']
+    password = request.form['password']
+    is_stego = request.form.get('is_stego') # Check for the stego flag
 
-    stego_path = os.path.join(app.config["UPLOAD_FOLDER"], secure_filename(stego_file.filename))
-    stego_file.save(stego_path)
+    # 2. Save file temporarily
+    input_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(input_file.filename))
+    input_file.save(input_path)
 
     try:
-        encrypted_bytes = extract_bytes_from_image(stego_path)
+        # 3. Use your original functions based on the stego flag
+        if is_stego:
+            encrypted_bytes = extract_bytes_from_image(input_path)
+        else:
+            with open(input_path, "rb") as f:
+                # Read the 4-byte header and then the rest of the data
+                length_bytes = f.read(4)
+                if len(length_bytes) < 4:
+                     raise ValueError("Encrypted data is too short to read header.")
+                encrypted_bytes = f.read()
+        
+        # 4. Decrypt the data
         decrypted_bytes = decrypt_image(encrypted_bytes, password)
 
-        # Schedule cleanup of the uploaded stego file
-        _cleanup_file_later(stego_path, delay=5.0)
-
-        if not decrypted_bytes:
-            try:
-                if os.path.exists(stego_path):
-                    os.remove(stego_path)
-            except Exception:
-                pass
-            return jsonify({"error": "Decrypted payload is empty."}), 400
-
-        # Parse payload to get original filename and bytes
-        try:
-            orig_name, file_bytes = parse_decrypted_payload(decrypted_bytes)
-        except Exception:
-            # Fallback: treat decrypted_bytes as raw image bytes
-            orig_name = "extracted_secret"
-            file_bytes = decrypted_bytes
-
-        # Guess a mimetype from filename extension
-        import mimetypes
-        mimetype, _ = mimetypes.guess_type(orig_name)
-        if not mimetype:
-            mimetype = "application/octet-stream"
-
+        # 5. Send the decrypted image data back
         return send_file(
-            io.BytesIO(file_bytes),
+            io.BytesIO(decrypted_bytes),
             as_attachment=True,
-            download_name=orig_name,
-            mimetype=mimetype,
+            download_name='extracted_secret.png',
+            mimetype='image/png'
         )
+    except Exception as e:
+        return jsonify({"error": f"Failed to extract. Check password or file integrity. Error: {e}"}), 400
+    finally:
+        # 6. Clean up
+        if os.path.exists(input_path): os.remove(input_path)
 
-    except ValueError as e:
-        try:
-            if os.path.exists(stego_path):
-                os.remove(stego_path)
-        except Exception:
-            pass
-        return jsonify({"error": str(e)}), 400
-    except Exception:
-        # We don't reveal detailed crypto errors to clients in production
-        try:
-            if os.path.exists(stego_path):
-                os.remove(stego_path)
-        except Exception:
-            pass
-        return jsonify({"error": "Failed to extract. Check password or file integrity."}), 400
-
-
-if __name__ == "__main__":
-    # For production use a proper WSGI server (gunicorn/uWSGI).
-    # The debug server should not be used in production.
-    app.run(host="0.0.0.0", debug=False)
+if __name__ == '__main__':
+    app.run(debug=True)
